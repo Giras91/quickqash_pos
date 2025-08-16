@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install vcpkg and Qt
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          C:\vcpkg\vcpkg.exe install qt6-base:x64-windows qt6-tools:x64-windows
+        shell: powershell
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
+      - name: Configure CMake (Visual Studio)
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+        shell: powershell
+
+      - name: Build tests
+        run: |
+          cmake --build build --config Release --target QuickQashTests
+        shell: powershell
+
+      - name: Run ctest
+        run: |
+          ctest --test-dir build --output-on-failure
+        shell: powershell
+
+      - name: Package with CPack
+        run: |
+          pushd build
+          cpack --config CPackConfig.cmake
+          popd
+        shell: powershell
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickqash-package
+          path: build/*.zip
+
+      - name: Install Chocolatey (for Inno Setup)
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force;
+          iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+        shell: powershell
+
+      - name: Install Inno Setup
+        run: |
+          choco install -y innosetup
+        shell: powershell
+
+      - name: Build installer (Inno Setup)
+        run: |
+          # Install files into a staging dir for the installer
+          cmake --install build --config Release --prefix ${PWD}\installer\install
+          # Build installer using ISCC
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-Not (Test-Path $iscc)) {
+            # fallback to Program Files
+            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "${{ github.workspace }}\\packaging\\quickqash_installer.iss"
+        shell: powershell
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickqash-installer
+          path: QuickQashSetup-*.exe
+
+      - name: Decode signing certificate (skip if not provided)
+        run: |
+          $signingPfx = "${{ secrets.SIGNING_PFX }}"
+          if (-not $signingPfx) {
+            Write-Output "No signing certificate provided; skipping decode."
+            exit 0
+          }
+          Write-Output "Decoding signing certificate..."
+          $pfxb = [System.Convert]::FromBase64String($signingPfx)
+          [System.IO.File]::WriteAllBytes("$env:RUNNER_TEMP\signing.pfx", $pfxb)
+        shell: powershell
+
+      - name: Sign installer (skip if no certificate)
+        run: |
+          $signingPfx = "${{ secrets.SIGNING_PFX }}"
+          $signingPassword = "${{ secrets.SIGNING_PASSWORD }}"
+          if (-not $signingPfx -or -not $signingPassword) {
+            Write-Output "No signing credentials provided; skipping signing."
+            exit 0
+          }
+          $pfx = "$env:RUNNER_TEMP\signing.pfx"
+          $pwd = $signingPassword
+          $installer = Get-ChildItem -Path . -Filter "QuickQashSetup-*.exe" | Select-Object -First 1
+          if (-Not $installer) { Write-Error "Installer not found"; exit 1 }
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+          if (-not (Test-Path $signtool)) {
+            $signtool = "C:\Program Files\Windows Kits\10\bin\x64\signtool.exe"
+          }
+          if (-not (Test-Path $signtool)) { Write-Error "signtool not found on runner"; exit 1 }
+          & $signtool sign /f $pfx /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "$($installer.FullName)"
+        shell: powershell

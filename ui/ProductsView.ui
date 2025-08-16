@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ProductsView</class>
+ <widget class="QWidget" name="ProductsView">
+  <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QToolBar" name="toolbar">
+      <property name="toolButtonStyle">
+        <enum>Qt::ToolButtonTextBesideIcon</enum>
+      </property>
+      <widget class="QPushButton" name="btn_add">
+        <property name="text">
+         <string>Add</string>
+        </property>
+      </widget>
+      <widget class="QPushButton" name="btn_edit">
+        <property name="text">
+         <string>Edit</string>
+        </property>
+      </widget>
+      <widget class="QPushButton" name="btn_delete">
+        <property name="text">
+         <string>Delete</string>
+        </property>
+      </widget>
+     </widget>
+    </item>
+   <item>
+    <widget class="QTableView" name="table_products">
+     <property name="minimumSize">
+      <size>
+       <width>600</width>
+       <height>400</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
